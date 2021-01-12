@@ -4,7 +4,8 @@
  *
  */
 var LANG = [];
-var API_URL = document.URL.indexOf('beep.test') > -1 ? 'https://beep.test/api/' : document.URL.indexOf('test.beep.nl') > -1 ? 'https://test.beep.nl/api/' : 'https://api.beep.nl/api/'; //var API_URL 				= 'https://api.beep.nl/api/';
+//var API_URL = document.URL.indexOf('beep.test') > -1 ? 'https://beep.test/api/' : document.URL.indexOf('test.beep.nl') > -1 ? 'https://test.beep.nl/api/' : 'https://api.beep.nl/api/'; //var API_URL 				= 'https://api.beep.nl/api/';
+var API_URL = 'http://www.dew-va.com:8090/api/';
 
 var CONNECTION_FREQ_REMOTE = 60 * 1000;
 var COLORS = {

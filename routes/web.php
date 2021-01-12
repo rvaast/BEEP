@@ -14,7 +14,7 @@
 Auth::routes(['verify' => true]);
 
 Route::get('/',function(){
-	return redirect('https://beep.nl');
+	return redirect('http://www.dew-va.com:8090/login');
 });
 
 Route::get('home', function(){
