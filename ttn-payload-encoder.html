@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>TTN payload encoder</title>
+        <script src="ttn-payload-encoder.js"></script>
+        <style type="text/css">
+            body{
+                font-family: Arial, sans-serif;
+            }
+            table{
+                border: 1px solid #ddd;
+            }
+            table th{
+                text-align: left;
+                padding: 5px;
+            }
+            table td{
+                border-top: 1px solid #ddd;
+                padding: 5px;
+                vertical-align: top;
+                width: 250px;
+            }
+            textarea{
+                font-family: courier;
+            }
+
+            input
+            {
+                margin: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Choose encoding port</h1>
+        <!-- With datalist
+        <input id="portSelection" list="ports" onChange="portChanged()">
+
+        <datalist id="ports">
+            <option value="1">Port 1</option>
+            <option value="2">Port 2</option>
+            <option value="3">Port 3</option>
+            <option value="4">Port 4</option>
+        </datalist>
+        -->
+
+        <button onclick="generatePayload()" id="generation">Generate encoded message</button>
+        <h3>BYTES Result :</h3>
+        <textarea id="bytes" cols="140" rows="2"></textarea>
+        <h3>HEX Result :</h3>
+        <textarea id="HEX" cols="80" rows="2"></textarea>
+
+        <table>
+            <tbody>
+                    <tr>
+                        <td>
+                            <div id="portStaticInput">
+                                <select id="portSelection" onChange="portChanged(this)">
+                                    <option value="" disabled selected>Select your port</option>
+                                    <option value="1">Port 1</option>
+                                    <option value="2">Port 2</option>
+                                    <option value="3">Port 3</option>
+                                    <option value="4">Port 4</option>
+                                </select>
+                                <div id="payloadInputForm">
+                                
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr id="optionSelector">
+
+                    </tr>
+            </tbody>
+        </table>
+    </body>
+</html>
