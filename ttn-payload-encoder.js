@@ -120,7 +120,7 @@ function generatePayload()
             if(ds18b20.value != "")
             {
                 // Converting value into 2 bytes
-                var ds18b20val = parseInt(ds18b20.value) * 100
+                var ds18b20val = ds18b20.value * 100
                 var firstByte = ds18b20val >> 8
                 var secondByte = ds18b20val % 256
                 if(firstByte < 0)
