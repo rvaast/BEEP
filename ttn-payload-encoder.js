@@ -117,11 +117,12 @@ function generatePayload()
         for(var i = 0; i < ds18b20_values.length; i++)
         {
             var ds18b20 = ds18b20_values.item(i)
-            if(ds18b20.value != "" && ds18b20.value > 0)
+            if(ds18b20.value != "")
             {
                 // Converting value into 2 bytes
-                var firstByte = (ds18b20.value * 100) >> 8
-                var secondByte = (ds18b20.value * 100) % 256
+                var ds18b20val = parseInt(ds18b20.value) * 100
+                var firstByte = ds18b20val >> 8
+                var secondByte = ds18b20val % 256
                 if(firstByte < 0)
                 {
                     firstByte += 256
@@ -158,7 +159,6 @@ function generatePayload()
         for(var i = 0; i < fft_values.length; i++)
         {
             var fft_value = fft_values.item(i)
-            console.log(fft_value.value)
             var fft_firstByte = fft_value.value >> 8
             var fft_secondByte = fft_value.value % 256
             bytesArray.push(fft_firstByte, fft_secondByte)
@@ -176,7 +176,7 @@ function generatePayload()
     {
         var BME280_t = document.getElementById("BME280t").value * 100
         var BME280_h = document.getElementById("BME280h").value * 100
-        var BME280_p = document.getElementById("BME280p").value * 100
+        var BME280_p = document.getElementById("BME280p").value
 
         if(BME280_t != 0)
         {
