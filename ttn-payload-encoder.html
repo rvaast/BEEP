@@ -25,40 +25,26 @@
                 font-family: courier;
             }
 
-            input, select
+            input, select, button
             {
                 margin: 5px;
             }
-            #decodedContent{
-                position: relative;
-                display: none;
-            }
 
             #main-generate{
-                width: 60%;
                 float: left;
             }
-            #main-send{
-                width: 40%;
-                float: right;
+
+            .example
+            {
+                opacity: 70%;
             }
         </style>
     </head>
     <body>
         <div id="main-generate">
+    
             <h1>Choose encoding port</h1>
-    
-            <button onclick="generatePayload()" id="generation">Generate encoded message</button>
-            <h4><span id="errorMessage"></span></h4>
-            <h3>BYTES Result :</h3>
-            <textarea id="bytes" cols="80" rows="2"></textarea>
-            <h3>HEX Result :</h3>
-            <textarea id="HEX" cols="80" rows="2"></textarea>
-            <input id="decodingPort" type="number" name="port" min="0" max="9" value="3">
-            <button onclick="test()">TEST</button>
-            <h3>Decoder test result:</h3>
-            <textarea id="decoder-result" cols="100" rows="10"></textarea>
-    
+
             <table>
                 <tbody>
                         <tr>
@@ -83,30 +69,25 @@
                 </tbody>
             </table>
     
-            <div id="decodedContent">
-                <table id="decodedTable">
-                    <thead>
-                        <tr>
-                            <th>Field</th>
-                            <th>Value</th> 
-                        </tr>
-                    </thead>
-                    <tbody id="decodedTableBody">
+            <button onclick="generatePayload()" id="generation">Generate encoded message</button>
+            <h4><span id="errorMessage"></span></h4>
+            <h3>Payload (Used for TTN) :</h3>
+            <textarea class="TTN-Input" id="HEX" cols="80" rows="2"></textarea>
+            <input id="decodingPort" type="number" name="port" min="0" max="9" value="3">
+            <button onclick="test()">Decode payload</button>
+            <h3>JSON (User for HTTP) :</h3>
+            <textarea class="HTTP-Input" id="decoder-result" cols="100" rows="10"></textarea>
     
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div id="main-send">
             <h1>Sending payload to BEEP</h1>
             <select id="apiSelection" onChange="changeAPI(this)">
                 <option value="" disabled selected>Choose your API</option>
                 <option value="TTN">TTN</option>
-                <option value="Other">Other</option>
+                <option value="HTTP">HTTP</option>
             </select>
             <div id="APIFields">
-                
-            </div> 
+                    
+            </div>
+            <h4><span id="send-error-message"></span></h4>
         </div>
         <script>
             function test()
@@ -139,10 +120,6 @@
 
                 var decoded   = Decoder(byteArray, port);
 
-                DisplayDecodedValue(decoded);
-
-                console.log('decoded', decoded);
-                document.getElementById("bytes").innerHTML = byteArray;
                 document.getElementById("decoder-result").innerHTML = JSON.stringify(decoded);
             }
         </script>

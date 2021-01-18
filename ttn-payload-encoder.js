@@ -47,7 +47,8 @@ const payloadInputForm = {
 }
 
 const apiFields = {
-    "TTN": "<label>Enter your TTN app Id :<input id=\"app-id\" type=\"text\" placeholder=\"TTN app Id\"></input></label><br>"
+    "TTN": "<label>Enter your TTN app Id :<input id=\"app-id\" type=\"text\" placeholder=\"TTN app_id\" class=\"TTN-input\"></input></label><br><label>Enter your TTN device ID :<input type=\"text\" placeholder=\"TTN dev_id\" id=\"dev-id\" class=\"TTN-input\"></input></label><br><label>Enter your device EUI :<input type=\"text\" placeholder=\"device EUI\" id=\"dev-eui\" class=\"TTN-input\"></input></label><br><label>Your domain :<input type=\"text\" placeholder=\"Your domain\" id=\"domain\" class=\"TTN-input\"></input><label class=\"example\">ex : http://api.beep.nl</label></label><br><button onClick=\"sendTTN()\">Send payload</button>",
+    "HTTP": "<label>Enter your domain :<input class=\"HTTP-Input\" type=\"text\" id=\"domain\" placeholder=\"Your domain\"></input><label class=\"example\">ex : http://api.beep.nl</label></label><br><label>Your DEV EUI :<input class=\"HTTP-Input\" type=\"text\" id=\"dev-eui\" placeholder=\"Your DEV EUI\"></input></label><br><button onClick=\"sendHTTP()\">Send payload</button>"
 }
 
 const portSelection = "<select id=\"portSelection\" onChange=\"portChanged(this)\"><option value=\"\" disabled selected>Select your port</option><option value=\"1\">Port 1</option><option value=\"2\">Port 2</option><option value=\"3\">Port 3</option><option value=\"4\">Port 4</option></select>"
@@ -952,7 +953,7 @@ function Decoder(bytes, port) {
   }
 
 
-function DisplayDecodedValue(decoded)
+/*function DisplayDecodedValue(decoded)
 {
   var bodyString = ""
 
@@ -964,37 +965,72 @@ function DisplayDecodedValue(decoded)
   document.getElementById("decodedTableBody").innerHTML = bodyString
 
   document.getElementById("decodedContent").style.display = "block"
-}
-
-function sendPayload()
-{
-    var checked = document.getElementById("sensor-type").checked
-    var sensor_type = "sensors"
-    var url = ""
-    if(checked)
-        sensor_type = "lora_sensors"
-    
-    var json = JSON.parse(document.getElementById("payload-send-input").value)
-    var domain = document.getElementById("domain-name").value
-
-
-    var hardware_id = document.getElementById("hardware-id-input").value
-
-    url = domain + "api/" + sensor_type + "/"
-    json.key = hardware_id
-
-    fetch(url, {method: 'POST', body: JSON.stringify(json)})
-        .then(function(result) {
-            console.log(result)
-        })
-    
-}
+}*/
 
 function changeAPI(cbx)
 {
     var api = cbx.value
-    if(api == "TTN")
+    document.getElementById("APIFields").innerHTML = apiFields[api]
+}
+
+function sendTTN()
+{
+    var allInputs = document.getElementsByClassName("TTN-input")
+    for(var i = 0; i < allInputs.length; i++)
     {
-        document.getElementById("APIFields").innerHTML = apiFields["TTN"]
+        if(allInputs.item(i).value == "")
+        {
+          document.getElementById("send-error-message").innerHTML = "One of the fields is empty."
+          document.getElementById("send-error-message").style.backgroundColor = "RED"
+          return false
+        }
     }
+
+    var app_id = document.getElementById("app-id").value
+    var dev_id = document.getElementById("dev-id").value
+    var dev_eui = document.getElementById("dev-eui").value
+    var payload = document.getElementById("HEX").value
+    var port = document.getElementById("decodingPort").value
+
+    var payload64 = hexToBASE64(payload)
+
+    var domain = document.getElementById("domain").value
+    var url = domain + "/api/lora_sensors"
+    fetch(url, { method: 'POST', body: JSON.stringify({ "app_id":app_id, "dev_id":dev_id,"hardware_serial":dev_eui,"port":port, "counter":0,"payload_raw":payload64,"metadata":{"time":new Date()}}), headers: {"Content-type": "application/json; charset=UTF-8"}})
+
+    document.getElementById("send-error-message").innerHTML = "OK"
+    document.getElementById("send-error-message").style.backgroundColor = "GREEN"
+
+    return true
+}
+
+function sendHTTP()
+{
+  var allInputs = document.getElementsByClassName("HTTP-Input")
+  for(var i = 0; i < allInputs.length; i++)
+  {
+    if(allInputs.item(i).value == "")
+    {
+      document.getElementById("send-error-message").innerHTML = "One of the fields is empty."
+      document.getElementById("send-error-message").style.backgroundColor = "RED"
+      return false
+    }
+  }
+
+  var json = JSON.parse(document.getElementById("decoder-result").value)
+  json.key = document.getElementById("dev-eui").value
+  var domain = document.getElementById("domain").value
+  url = domain + "/api/sensors"
+  fetch(url, { method: 'POST', body: JSON.stringify(json), headers: {"Content-type": "application/json; charset=UTF-8"}})
+
+
+  document.getElementById("send-error-message").innerHTML = "OK"
+  document.getElementById("send-error-message").style.backgroundColor = "GREEN"
+
+  return true
+}
+
+function hexToBASE64(str)
+{
+  return btoa(String.fromCharCode.apply(null, str.replace(/\r|\n/g, "").replace(/([\da-fA-F]{2}) ?/g, "0x$1 ").replace(/ +$/, "").split(" ")))
 }
