@@ -8,6 +8,8 @@ use App\User;
 use App\Device;
 use App\Category;
 use App\Measurement;
+use App\Models\FlashLog;
+use App\Models\Webhook;
 // use App\Transformer\SensorTransformer;
 use Validator;
 use InfluxDB;
@@ -697,45 +699,250 @@ class MeasurementController extends Controller
     }
 
     /**
-    * api/flashlog
-    * POST data from BEEP base fw 1.5.0+ FLASH log (with timestamp), interpret data and store in InlfuxDB (overwriting existing data)
-    * @authenticated
-    * @bodyParam key string required DEV EUI of the Device to enable storing sensor data
-    * @bodyParam data binary required Datastream from device
+    api/sensors/flashlog
+    POST data from BEEP base fw 1.5.0+ FLASH log (with timestamp), interpret data and store in InlfuxDB (overwriting existing data). BEEP base BLE cmd: when the response is 200 OK and erase_mx_flash > -1, provide the ERASE_MX_FLASH BLE command (0x21) to the BEEP base with the last byte being the HEX value of the erase_mx_flash value (0 = 0x00, 1 = 0x01, i.e.0x2100, or 0x2101)
+    @authenticated
+    @bodyParam id integer Device id to update. (Required without key and hardware_id)
+    @bodyParam key string DEV EUI of the sensor to enable storing sensor data incoming on the api/sensors or api/lora_sensors endpoint. (Required without id and hardware_id)
+    @bodyParam hardware_id string Hardware id of the device as device name in TTN. (Required without id and key)
+    @bodyParam data string MX_FLASH_LOG Hexadecimal string lines (new line) separated, with many rows of log data, or text file binary with all data inside.
+    @bodyParam file binary File with MX_FLASH_LOG Hexadecimal string lines (new line) separated, with many rows of log data, or text file binary with all data inside.
+    @queryParam show integer 1 for displaying info in result JSON, 0 for not displaying (default).
+    @queryParam save integer 1 for saving the data to a file (default), 0 for not save log file.
+    @response{
+          "lines_received": 20039,
+          "bytes_received": 9872346,
+          "log_saved": true,
+          "log_parsed": false,
+          "log_messages":29387823
+          "erase_mx_flash": -1,
+          "erase":false,
+          "erase_type":"fatfs"
+        }
     */
     public function flashlog(Request $request)
     {
-        $out = [];
+        $user= $request->user();
+        $inp = $request->all();
+        $sid = isset($inp['id']) ? $inp['id'] : null;
+        $key = null;
         
-        if ($request->filled('key') && $request->filled('data'))
+        if (isset($inp['key']) && !isset($inp['hardware_id']) && !isset($inp['id']) )
         {
-            $device = $request->user()->devices->where('key', $request->input('key'))->first();
-            if ($device)
+            $key = strtolower($inp['key']);
+            $dev = $user->devices()->whereRaw('lower(`key`) = \''.$key.'\'')->first(); // check for case insensitive device key before validation
+            if ($dev)
             {
-                $logFileName = 'lora_sensor_'.$request->input('key').'_flash.log';
-                Storage::disk('local')->put('sensors/'.$logFileName, $request->input('data'));
-
-                // interpret every line as a standard LoRa message (with time (13 characters) cut off at the end)
-                $in  = explode("\n", $request->input('data'));
-                foreach ($in as $line)
-                {
-                    $data_array = $this->decode_flashlog_payload($line);
-                    if (in_array('time', array_keys($data_array)))
-                    {
-                        $unix = $data_array['time'];
-                        unset($data_array['time']);
-                        $out[$unix] = $data_array; 
-                    }
-                }
-                if (count($out) > 0)
-                {
-                    $logFileName = 'lora_sensor_'.$request->input('key').'_flash.json';
-                    Storage::disk('local')->put('sensors/'.$logFileName, json_encode($out));
-                }
-
+                $inp['id'] = $dev->id;
+                $sid       = $inp['id'];
             }
         }
-        return Response::json(['processed_lines'=>count($out)], count($out) > 0 ? 200 : 500);
+        
+        $hwi = null;
+        if (isset($inp['hardware_id']))
+        {
+            $hwi = strtolower($inp['hardware_id']);
+            $inp['hardware_id'] = $hwi;
+        }
+
+        $validator = Validator::make($inp, [
+            'id'                => ['required_without_all:key,hardware_id','integer','exists:sensors,id'],
+            'hardware_id'       => ['required_without_all:key,id','string','exists:sensors,hardware_id'],
+            'key'               => ['required_without_all:id,hardware_id','string','min:4','exists:sensors,key'],
+            'data'              => 'required_without:file',
+            'file'              => 'required_without:data|file',
+            'show'              => 'nullable|boolean',
+            'save'              => 'nullable|boolean'
+        ]);
+
+        $result   = null;
+        $parsed   = false;
+        $saved    = false;
+        $files    = false;
+        $messages = 0;
+
+        if ($validator->fails())
+        {
+            return Response::json(['errors'=>$validator->errors()], 400);
+        }
+        else
+        {
+            $device = null;
+
+            if (isset($sid))
+                $device = $user->devices()->where('id', $sid)->first();
+            else if (isset($key) && !isset($sid) && isset($hwi))
+                $device = $user->devices()->where('hardware_id', $hwi)->where('key', $key)->first();
+            else if (isset($hwi))
+                $device = $user->devices()->where('hardware_id', $hwi)->first();
+            else if (isset($key) && !isset($sid) && !isset($hwi))
+                $device = $user->devices()->where('key', $key)->first();
+            
+            if ($device == null)
+                return Response::json(['errors'=>'device_not_found'], 400);
+
+            $out   = [];
+            $disk  = env('FLASHLOG_STORAGE', 'public');
+            $f_dir = 'flashlog';
+            $data  = '';
+            $lines = 0; 
+            $bytes = 0; 
+            $logtm = 0;
+            $erase = -1;
+            $show  = $request->filled('show') ? $inp['show'] : false;
+            $save  = $request->filled('save') ? $inp['save'] : true;
+            $f_log = null;
+            $f_str = null;
+            $f_par = null;
+            
+            if ($device && ($request->filled('data') || $request->hasFile('file')))
+            {
+                $sid  = $device->id; 
+                $time = date("YmdHis");
+                
+                if ($request->hasFile('file') && $request->file('file')->isValid())
+                {
+                    $files= true;
+                    $file = $request->file('file');
+                    $name = "sensor_".$sid."_flash_$time.log";
+                    $f_log= Storage::disk($disk)->putFileAs($f_dir, $file, $name); 
+                    $saved= $f_log ? true : false; 
+                    $data = Storage::disk($disk)->get($f_dir.'/'.$name);
+                    if ($save == false) // check if file needs to be saved
+                    {
+                        $saved = Storage::disk($disk)->delete($f_dir.'/'.$name) ? false : true;
+                        $f_log = null;
+                    }
+                }
+                else
+                {
+                    $data = $request->input('data');
+                    if ($save)
+                    {
+                        $logFileName = $f_dir."/sensor_".$sid."_flash_$time.log";
+                        $saved = Storage::disk($disk)->put($logFileName, $data);
+                        $f_log = Storage::disk($disk)->url($logFileName); 
+                    }
+                }
+
+                $data    = preg_replace('/[\r\n|\r|\n|)(]+/', ',', $data);
+
+                // interpret every line as a standard LoRa message
+                $in      = explode(",", $data);
+                $lines   = count($in);
+                $bytes   = 244 * $lines;
+
+                $alldata = "";
+                foreach ($in as $line)
+                    $alldata .= substr(preg_replace('/[^A-Fa-f0-9]/', '', $line),4);
+
+                // Split data by 0A02 and 0A03 (0A03 30 1B) 0A0330
+                $data  = preg_replace('/0A022([A-Fa-f0-9]{1})0100/', "0A\n022\${1}0100", $alldata);
+
+                // Calculate from payload parts
+                //            port pl_len     |bat 5 bytes value |weight (1/2)  3/6 bytes value  |ds18b20 (0-9) 0-20 bytes value |audio (0-12 bins)   sta/sto bin     0-12 x 2 bytes   |bme280 3x 2b values|time             |delimiter
+                // $payload = '/0([0|3]{1})([A-Fa-f0-9]{2})1B([A-Fa-f0-9]{10})0A0([1-2]{1})([A-Fa-f0-9]{6,12})040([0-9]{1})([A-Fa-f0-9]{0,40})0C0([A-Ca-c0-9]{1})([A-Fa-f0-9]{4})([A-Fa-f0-9]{0,48})07([A-Fa-f0-9]{12})([A-Fa-f0-9]{0,12})0A/';
+                // $replace = "\n0\${1}\${2}1B\${3}0A0\${4}\${5}040\${6}\${7}0C0\${8}\${9}\${10}07\${11}\${12}0A";
+
+                // Calculate from payload parts
+                // $payload = '/([A-Fa-f0-9]{4})1B([A-Fa-f0-9]{10})0A0([1-2]{1})([A-Fa-f0-9]{6,12})040([0-9]{1})([A-Fa-f0-9]{0,40})0C0([A-Ca-c0-9]{1})([A-Fa-f0-9]{4})([A-Fa-f0-9]{0,48})07([A-Fa-f0-9]{12})([A-Fa-f0-9]{0,12})0A/';
+                // $replace = "\n\${1}1B\${2}0A0\${3}\${4}040\${5}\${6}0C0\${7}\${8}\${9}07\${10}\${11}0A";
+
+                // Calculate from payload min/max length
+                $payload = '/([A-Fa-f0-9]{4})1B([A-Fa-f0-9]{10,14})0A([A-Fa-f0-9]{77,90})0A/';
+                
+                $replace = "\n\${1}1B\${2}0A0\${3}0A";
+                
+                $data    = preg_replace($payload, $replace, $data);
+
+                // fix missing battery hex code
+                $data  = preg_replace('/0A03([A-Fa-f0-9]{2})([A-Fa-f0-9]{2})0D/', "0A\n03\${1}1B0D\${2}0D", $data);
+                // split error lines
+                $data  = preg_replace('/03([A-Fa-f0-9]{90,120})0A([A-Fa-f0-9]{0,4})03([A-Fa-f0-9]{90,120})0A/', "03\${1}0A\${2}\n03\${3}0A", $data);
+                $data  = preg_replace('/03([A-Fa-f0-9]{90,120})0A1B([A-Fa-f0-9]{90,120})0A/', "03\${1}0A\n031E1B\${2}0A", $data); // missing 031E
+                $data  = preg_replace('/02([A-Fa-f0-9]{76})0A03([A-Fa-f0-9]{90,120})0A/', "02\${1}0A\n03\${2}0A", $data);
+
+
+                if ($save)
+                {
+                    $logFileName =  $f_dir."/sensor_".$sid."_flash_stripped_$time.log";
+                    $saved = Storage::disk($disk)->put($logFileName, $data);
+                    $f_str = Storage::disk($disk)->url($logFileName); 
+                }
+
+                $counter = 0;
+                $in      = explode("\n", $data);
+                $log_min = 0;
+                foreach ($in as $line)
+                {
+                    $counter++;
+                    $data_array = $this->decode_flashlog_payload($line, $show);
+                    $data_array['i'] = $counter;
+                    
+                    if (in_array('time', array_keys($data_array)))
+                        $logtm++;
+
+                    $out[] = $data_array;
+                }
+
+                $messages = count($out);
+                if ($messages > 0)
+                {
+                    $parsed = true;
+                    if ($save)
+                    {
+                        $logFileName = $f_dir."/sensor_".$sid."_flash_parsed_$time.json";
+                        $saved = Storage::disk($disk)->put($logFileName, json_encode($out));
+                        $f_par = Storage::disk($disk)->url($logFileName); 
+                    }
+                }
+            }
+            $result = [
+                'lines_received'=>$lines,
+                'bytes_received'=>$bytes,
+                'log_has_timestamps'=>$logtm,
+                'log_saved'=>$saved,
+                'log_parsed'=>$parsed,
+                'log_messages'=>$messages,
+                'erase_mx_flash'=>$saved ? 0 : -1,
+                'erase'=>$saved,
+                'erase_type'=>$saved ? 'fatfs' : null // fatfs, or full
+            ];
+
+            // create Flashlog entity
+            if ($save)
+            {
+                $flashlog = [
+                    'user_id'=>$user->id,
+                    'device_id'=>$device->id,
+                    'hive_id'=>$device->hive_id,
+                    'bytes_received'=>$bytes,
+                    'log_has_timestamps'=>$logtm,
+                    'log_saved'=>$saved,
+                    'log_parsed'=>$parsed,
+                    'log_messages'=>$messages,
+                    'log_file'=>$f_log,
+                    'log_file_stripped'=>$f_str,
+                    'log_file_parsed'=>$f_par
+                ];
+                FlashLog::create($flashlog);
+                Webhook::sendNotification("Flashlog from ".$user->name." device: ".$device->name." parsed:".$parsed." MB: ".$bytes*0.00000095367432." messages:".$messages." saved:".$saved." to disk:".$disk.'/'.$f_dir);
+            }
+
+            if ($show)
+            {
+                $result['fields'] = array_keys($inp);
+                $result['output'] = $out;
+            }
+        }
+
+        if ($parsed)
+        return Response::json($result, $parsed ? 200 : 500);
+    }
+
+    public function decode_beep_lora_payload(Request $request, $port, $payload)
+    {
+        return Response::json($this->decode_beep_payload($payload, $port));
     }
 
     /**
